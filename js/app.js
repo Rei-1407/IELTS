@@ -196,7 +196,10 @@
     const h = location.hash.replace(/^#/, '') || '/';
     for (const r of routes) {
       const m = h.match(r.re);
-      if (m) { r.fn(...m.slice(1)); highlightNav(h); window.scrollTo(0, 0); return; }
+      if (m) {
+        view().classList.remove('wide');
+        r.fn(...m.slice(1)); highlightNav(h); window.scrollTo(0, 0); return;
+      }
     }
     location.hash = '#/';
   }
@@ -372,6 +375,7 @@
 
   /* ================= LEARN ================= */
   function renderLearn(chId) {
+    view().classList.add('wide');
     chId = chId || store.data.settings.lastChapter || 'c1';
     let ch = DATA.chapters.find(c => c.id === chId) || DATA.chapters.find(c => c.id === 'c1');
     store.data.settings.lastChapter = ch.id;
@@ -394,7 +398,8 @@
             <input type="search" id="searchInput" placeholder="🔍 Tìm kiếm (vd: đảo ngữ, wish)…" autocomplete="off">
             <div class="search-results" id="searchResults" style="display:none"></div>
           </div>
-          ${tocHtml}
+          <button class="btn ghost sm toc-toggle" id="tocToggle">☰ Mục lục chương</button>
+          <div class="toc-list" id="tocList">${tocHtml}</div>
         </div>
         <div class="content">
           <div class="card">
@@ -438,6 +443,10 @@
     document.querySelectorAll('.toc-item').forEach(el => {
       el.onclick = () => { location.hash = '#/learn/' + el.dataset.ch; };
     });
+
+    // nút mục lục trên mobile
+    const tt = $('#tocToggle');
+    if (tt) tt.onclick = () => $('#tocList').classList.toggle('open');
 
     setupSearch();
   }

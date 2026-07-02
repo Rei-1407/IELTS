@@ -83,6 +83,13 @@
     }
     pushChapter(cur);
 
+    // Trang giới thiệu: bỏ khối MỤC LỤC (sidebar web đã thay thế)
+    const intro = chapters.find(c => c.id === 'intro');
+    if (intro) {
+      const tocAt = intro.lines.findIndex(l => /^## MỤC LỤC/.test(l));
+      if (tocAt > 0) intro.lines = intro.lines.slice(0, tocAt);
+    }
+
     chapters.forEach(ch => { ch.md = ch.lines.join('\n'); });
 
     /* ----- trích xuất cặp ❌/✅ ----- */
