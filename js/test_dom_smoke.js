@@ -19,7 +19,7 @@ const cacheBySel = new Map();  // era:sel -> [stubs]
 function makeStub(extra, isView) {
   const el = {
     _inner: '',
-    style: {}, dataset: {}, classList: { toggle() {}, add() {}, remove() {} },
+    style: { setProperty() {} }, dataset: {}, classList: { toggle() {}, add() {}, remove() {} },
     onclick: null, oninput: null, onblur: null, onkeydown: null, onchange: null,
     disabled: false, value: '', textContent: '', scrollLeft: 0, scrollWidth: 0,
     focus() {}, click() {}, scrollIntoView() {}, remove() {}, appendChild() {},
@@ -89,6 +89,7 @@ const window = {
 const document = {
   documentElement: { dataset: {} },
   body: makeStub(),
+  addEventListener() {}, removeEventListener() {},
   querySelector(sel) { return sel[0] === '#' ? byId(sel.slice(1)) : (countIn(htmlLog, sel) ? queryAllIn(htmlLog, sel)[0] : null); },
   querySelectorAll(sel) { return queryAllIn(htmlLog, sel); },
   getElementById(id) { return byId(id); },
@@ -123,6 +124,7 @@ function goto(hash) { location.hash = hash; listeners.hashchange(); }
   goto('#/learn/c3');
   check('learn c3 render', htmlLog.includes('Thì động từ') && htmlLog.includes('Present Simple'));
   check('learn có nút luyện chương', htmlLog.includes('Luyện chương này'));
+  check('learn có thanh kéo cột', htmlLog.includes('tocResizer'));
   goto('#/learn/appD');
   check('learn phụ lục D render', htmlLog.includes('Ngân hàng bài tập'));
 

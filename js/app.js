@@ -608,6 +608,7 @@
           <button class="btn ghost sm toc-toggle" id="tocToggle">☰ Mục lục chương</button>
           <div class="toc-list" id="tocList">${tocHtml}</div>
         </div>
+        <div class="resizer" id="tocResizer" title="Kéo để chỉnh độ rộng mục lục"></div>
         <div class="content">
           <div class="card">
             <div class="md" id="mdContent"></div>
@@ -654,6 +655,30 @@
     // nút mục lục trên mobile
     const tt = $('#tocToggle');
     if (tt) tt.onclick = () => $('#tocList').classList.toggle('open');
+
+    // kéo chỉnh độ rộng mục lục (lưu lại cho lần sau)
+    const wrap = document.querySelector('.learn-wrap');
+    if (wrap && wrap.style.setProperty) wrap.style.setProperty('--toc-w', (store.data.settings.tocWidth || 320) + 'px');
+    const rz = $('#tocResizer');
+    if (rz) rz.onmousedown = e => {
+      e.preventDefault();
+      rz.classList.add('dragging');
+      document.body.classList.add('resizing');
+      const move = ev => {
+        const w = Math.min(560, Math.max(200, ev.clientX - wrap.getBoundingClientRect().left));
+        wrap.style.setProperty('--toc-w', w + 'px');
+        store.data.settings.tocWidth = w;
+      };
+      const up = () => {
+        document.removeEventListener('mousemove', move);
+        document.removeEventListener('mouseup', up);
+        rz.classList.remove('dragging');
+        document.body.classList.remove('resizing');
+        store.save();
+      };
+      document.addEventListener('mousemove', move);
+      document.addEventListener('mouseup', up);
+    };
 
     setupSearch();
   }
