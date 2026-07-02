@@ -17,9 +17,10 @@ const logic = src.slice(start, end);
 const localStorage = { _d: {}, getItem(k) { return this._d[k] || null; }, setItem(k, v) { this._d[k] = v; }, removeItem(k) { delete this._d[k]; } };
 const sandbox = { P, DATA, localStorage, console };
 const fn = new Function('P', 'DATA', 'localStorage', 'console',
-  'function refreshStreakPill(){}\nconst document = { querySelector: () => null, querySelectorAll: () => [] };\n' + logic + `
+  'function refreshStreakPill(){}\nfunction refreshXpPill(){}\nfunction toast(){}\nfunction confetti(){}\nconst document = { querySelector: () => null, querySelectorAll: () => [] };\n' + logic + `
   return { dstr, addDays, store, streak, isCheckedIn, ensureCheckin, markLearned, dueChapters, todayChapter,
-           applySrsAfterDailyQuiz, buildQuiz, dailyQuizScope, today, chNumById, updateBestStreak };
+           applySrsAfterDailyQuiz, buildQuiz, dailyQuizScope, today, chNumById, updateBestStreak,
+           gam, counters, addXp, levelInfo, awardBadges, missionState, checkMissionBonus };
 `);
 const A = fn(P, DATA, localStorage, console);
 
@@ -87,6 +88,35 @@ check('mcq có 1 đáp án đúng', q1.filter(q => q.kind === 'mcq').every(q => 
 // quiz toàn cục
 const qAll = A.buildQuiz('p-1', null, 10);
 check('quiz không scope đủ 10 câu', qAll.length === 10);
+
+// ===== gamification =====
+A.store.data.checkins = {}; A.store.data.chapters = {};
+A.store.data.gam = { xp: 0, examDate: null, badges: {}, counters: {} };
+check('level 0 XP = Band 3.0', A.levelInfo(0).cur.band === '3.0');
+check('level 100 XP = Band 3.5', A.levelInfo(100).cur.band === '3.5');
+check('level max không có next', A.levelInfo(9999).next === null);
+A.markLearned('c1');
+check('XP sau học chương = 60 (10 điểm danh + 50 chương)', A.gam().xp === 60, '=' + A.gam().xp);
+A.ensureCheckin();
+check('điểm danh lần 2 cùng ngày không cộng XP', A.gam().xp === 60, '=' + A.gam().xp);
+A.counters().quizzes = 1;
+A.awardBadges();
+check('huy hiệu quiz1 mở', !!A.gam().badges.quiz1);
+check('huy hiệu chưa đạt vẫn khóa', !A.gam().badges.streak30);
+const ms = A.missionState();
+check('missionState 3 nhiệm vụ', ms.length === 3, JSON.stringify(ms.map(m => m.done)));
+check('nhiệm vụ điểm danh + học done', ms[0].done && ms[2].done && !ms[1].done);
+A.store.data.checkins[t].quiz = { score: 8, total: 10 };
+const xpBefore = A.gam().xp;
+A.checkMissionBonus();
+check('bonus 3 nhiệm vụ +20 XP', A.gam().xp === xpBefore + 20 && A.store.data.checkins[t].bonus === true, '=' + A.gam().xp);
+A.checkMissionBonus();
+check('bonus không cộng 2 lần', A.gam().xp === xpBefore + 20);
+// comeback
+A.store.data.checkins = {}; A.store.data.gam.counters = {};
+A.store.data.checkins[A.addDays(t, -10)] = {};
+A.ensureCheckin();
+check('comeback flag sau nghỉ dài', A.counters().comeback === true);
 
 console.log(fails === 0 ? '\nALL PASS' : '\n' + fails + ' FAILED');
 process.exit(fails ? 1 : 0);

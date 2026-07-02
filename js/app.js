@@ -40,7 +40,7 @@
   /* ================= store ================= */
   const KEY = 'ielts75_v1';
   const store = {
-    data: { settings: { theme: 'dark', lastChapter: 'c1' }, checkins: {}, chapters: {}, best: { streak: 0 } },
+    data: { settings: { theme: 'dark', lastChapter: 'c1' }, checkins: {}, chapters: {}, best: { streak: 0 }, gam: { xp: 0, examDate: null, badges: {}, counters: {} } },
     load() {
       try {
         const raw = localStorage.getItem(KEY);
@@ -48,6 +48,7 @@
           const d = JSON.parse(raw);
           this.data = Object.assign(this.data, d);
           this.data.settings = Object.assign({ theme: 'dark', lastChapter: 'c1' }, d.settings || {});
+          this.data.gam = Object.assign({ xp: 0, examDate: null, badges: {}, counters: {} }, d.gam || {});
         }
       } catch (e) { console.warn('store load', e); }
     },
@@ -75,7 +76,20 @@
 
   function ensureCheckin(date) {
     date = date || today();
-    if (!store.data.checkins[date]) store.data.checkins[date] = {};
+    if (!store.data.checkins[date]) {
+      const c = counters();
+      const days = Object.keys(store.data.checkins).sort();
+      const last = days[days.length - 1];
+      if (last && date > last) {
+        const gap = Math.round((new Date(date + 'T12:00') - new Date(last + 'T12:00')) / 86400000);
+        if (gap >= 4) c.comeback = true; // nghỉ >= 3 ngày rồi vẫn quay lại
+      }
+      store.data.checkins[date] = {};
+      const h = new Date().getHours();
+      if (h < 7) c.early = true;
+      if (h >= 23) c.night = true;
+      addXp(10, 'checkin');
+    }
     return store.data.checkins[date];
   }
 
@@ -101,6 +115,9 @@
     ci.learned = ci.learned || [];
     if (!ci.learned.includes(chId)) ci.learned.push(chId);
     updateBestStreak();
+    addXp(50, 'chương mới');
+    awardBadges();
+    checkMissionBonus();
     store.save();
     refreshStreakPill();
   }
@@ -123,6 +140,98 @@
       }
       st.next = addDays(t, st.interval);
     });
+  }
+
+  /* ================= gamification ================= */
+  const LEVELS = [
+    { band: '3.0', name: 'Khởi động', xp: 0 },
+    { band: '3.5', name: 'Làm quen', xp: 100 },
+    { band: '4.0', name: 'Người học chăm', xp: 250 },
+    { band: '4.5', name: 'Vượt vỡ lòng', xp: 450 },
+    { band: '5.0', name: 'Nửa chặng đường', xp: 700 },
+    { band: '5.5', name: 'Tăng tốc', xp: 1000 },
+    { band: '6.0', name: 'Vững ngữ pháp', xp: 1400 },
+    { band: '6.5', name: 'Sát mục tiêu', xp: 1900 },
+    { band: '7.0', name: 'Chạm ngưỡng', xp: 2500 },
+    { band: '7.5', name: 'MỤC TIÊU ĐẠT! 🎯', xp: 3200 },
+    { band: '8.0', name: 'Vượt kỳ vọng', xp: 4100 },
+    { band: '8.5', name: 'Cao thủ', xp: 5100 },
+    { band: '9.0', name: 'Huyền thoại ngữ pháp', xp: 6300 },
+  ];
+  function gam() {
+    if (!store.data.gam) store.data.gam = { xp: 0, examDate: null, badges: {}, counters: {} };
+    const g = store.data.gam;
+    if (!g.counters) g.counters = {};
+    if (!g.badges) g.badges = {};
+    return g;
+  }
+  function counters() { return gam().counters; }
+  function levelInfo(xp) {
+    let idx = 0;
+    for (let i = 0; i < LEVELS.length; i++) if (xp >= LEVELS[i].xp) idx = i;
+    const cur = LEVELS[idx], next = LEVELS[idx + 1] || null;
+    const pct = next ? Math.min(100, Math.round((xp - cur.xp) / (next.xp - cur.xp) * 100)) : 100;
+    return { idx, cur, next, pct };
+  }
+  function addXp(n, reason) {
+    const g = gam();
+    const before = levelInfo(g.xp).idx;
+    g.xp += n;
+    const after = levelInfo(g.xp);
+    if (after.idx > before) { toast('⬆️ Thăng cấp: Band ' + after.cur.band + ' — ' + after.cur.name); confetti(); }
+    store.save();
+    refreshXpPill();
+    return n;
+  }
+  function rangeLearned(a, b) { for (let i = a; i <= b; i++) if (!store.data.chapters['c' + i]) return false; return true; }
+  const BADGES = [
+    { id: 'streak3', ic: '🔥', nm: 'Nhóm lửa', ds: 'Chuỗi 3 ngày liên tiếp', test: () => streak() >= 3 },
+    { id: 'streak7', ic: '⚡', nm: 'Tuần rực cháy', ds: 'Chuỗi 7 ngày liên tiếp', test: () => streak() >= 7 },
+    { id: 'streak30', ic: '🌋', nm: 'Không thể cản', ds: 'Chuỗi 30 ngày liên tiếp', test: () => streak() >= 30 },
+    { id: 'quiz1', ic: '📝', nm: 'Phát súng đầu', ds: 'Hoàn thành quiz đầu tiên', test: c => (c.quizzes || 0) >= 1 },
+    { id: 'perfect1', ic: '💯', nm: 'Tuyệt đối', ds: 'Một quiz đúng 100%', test: c => (c.perfect || 0) >= 1 },
+    { id: 'great10', ic: '🏆', nm: 'Thợ săn điểm', ds: '10 quiz đạt từ 90% trở lên', test: c => (c.great || 0) >= 10 },
+    { id: 'correct100', ic: '🎯', nm: 'Trăm phát trăm trúng', ds: 'Tổng 100 câu trả lời đúng', test: c => (c.correct || 0) >= 100 },
+    { id: 'correct500', ic: '🧠', nm: 'Bộ não ngữ pháp', ds: 'Tổng 500 câu trả lời đúng', test: c => (c.correct || 0) >= 500 },
+    { id: 'part1', ic: '📗', nm: 'Nền móng vững', ds: 'Học xong Phần I (chương 1–10)', test: () => rangeLearned(1, 10) },
+    { id: 'part2', ic: '📘', nm: 'Bậc thang nâng cao', ds: 'Học xong Phần II (chương 11–21)', test: () => rangeLearned(11, 21) },
+    { id: 'part3', ic: '📙', nm: 'Tinh thông chuyên sâu', ds: 'Học xong Phần III (chương 22–30)', test: () => rangeLearned(22, 30) },
+    { id: 'all30', ic: '🎓', nm: 'Tốt nghiệp giáo trình', ds: 'Hoàn thành cả 30 chương', test: () => rangeLearned(1, 30) },
+    { id: 'cards10', ic: '🃏', nm: 'Vua lật thẻ', ds: 'Hoàn thành 10 phiên flashcard', test: c => (c.cards || 0) >= 10 },
+    { id: 'early', ic: '🌅', nm: 'Chim sớm', ds: 'Điểm danh trước 7 giờ sáng', test: c => !!c.early },
+    { id: 'night', ic: '🦉', nm: 'Cú đêm', ds: 'Điểm danh sau 23 giờ', test: c => !!c.night },
+    { id: 'comeback', ic: '💪', nm: 'Trở lại lợi hại hơn', ds: 'Quay lại học sau khi nghỉ 3 ngày trở lên', test: c => !!c.comeback },
+  ];
+  function awardBadges() {
+    const g = gam();
+    BADGES.forEach(b => {
+      if (!g.badges[b.id] && b.test(counters())) {
+        g.badges[b.id] = today();
+        toast('🏅 Huy hiệu mới: ' + b.nm + '!');
+        confetti();
+      }
+    });
+    store.save();
+  }
+  function missionState() {
+    const t = today();
+    const ci = store.data.checkins[t] || {};
+    const tc = todayChapter();
+    return [
+      { label: 'Điểm danh', done: !!store.data.checkins[t], go: '' },
+      { label: 'Làm quiz ngày (10 câu)', done: !!ci.quiz, go: '#/quiz' },
+      { label: tc ? 'Học chương mới hoặc luyện thêm' : 'Luyện tập / flashcard', done: !!((ci.learned && ci.learned.length) || ci.extra), go: tc ? '#/learn/' + tc.id : '#/cards' },
+    ];
+  }
+  function checkMissionBonus() {
+    const ci = store.data.checkins[today()];
+    if (!ci || ci.bonus) return;
+    if (missionState().every(m => m.done)) {
+      ci.bonus = true;
+      addXp(20, 'bonus ngày');
+      toast('🎁 Trọn vẹn ngày — đủ 3 nhiệm vụ: +20 XP');
+      store.save();
+    }
   }
 
   /* ================= xây quiz ================= */
@@ -205,7 +314,7 @@
   }
   function highlightNav(h) {
     const root = h.split('/')[1] || 'home';
-    const map = { '': 'home', learn: 'learn', quiz: 'quiz', cards: 'cards', ex: 'ex' };
+    const map = { '': 'home', learn: 'learn', quiz: 'quiz', cards: 'cards', ex: 'ex', awards: 'awards' };
     document.querySelectorAll('.nav a').forEach(a => {
       a.classList.toggle('active', a.dataset.route === (map[root] || 'home'));
     });
@@ -218,7 +327,49 @@
     pill.classList.toggle('lit', s > 0 && isCheckedIn());
   }
 
+  function refreshXpPill() {
+    const el = $('#xpPill');
+    if (!el) return;
+    const g = gam(), li = levelInfo(g.xp);
+    el.innerHTML = '<span class="band">Band ' + li.cur.band + '</span> · ' + g.xp + ' XP';
+  }
+
+  function toast(msg) {
+    let z = document.querySelector('.toast-zone');
+    if (!z) { z = document.createElement('div'); z.className = 'toast-zone'; document.body.appendChild(z); }
+    const t = document.createElement('div');
+    t.className = 'toast'; t.textContent = msg;
+    z.appendChild(t);
+    setTimeout(() => t.remove(), 4300);
+  }
+
+  function confetti() {
+    const z = document.createElement('div');
+    z.className = 'confetti-zone';
+    const colors = ['#7c96ff', '#34d399', '#fbbf24', '#f87171', '#b18cff', '#5eead4'];
+    for (let i = 0; i < 70; i++) {
+      const p = document.createElement('div');
+      p.className = 'confetti-p';
+      p.style.left = (Math.random() * 100) + '%';
+      p.style.background = colors[i % colors.length];
+      p.style.animationDuration = (1.6 + Math.random() * 1.7) + 's';
+      p.style.animationDelay = (Math.random() * 0.5) + 's';
+      z.appendChild(p);
+    }
+    document.body.appendChild(z);
+    setTimeout(() => z.remove(), 4000);
+  }
+
   /* ================= HOME ================= */
+  function countdownHtml() {
+    const ed = gam().examDate;
+    if (!ed) return `<span class="countdown-chip" id="examChip">🎯 Đặt ngày thi</span>`;
+    const days = Math.ceil((new Date(ed + 'T00:00') - new Date(today() + 'T00:00')) / 86400000);
+    if (days < 0) return `<span class="countdown-chip urgent" id="examChip">📅 Kỳ thi đã qua — đặt lại?</span>`;
+    if (days === 0) return `<span class="countdown-chip urgent" id="examChip">🔥 HÔM NAY LÀ NGÀY THI — CHIẾN!</span>`;
+    return `<span class="countdown-chip ${days <= 14 ? 'urgent' : ''}" id="examChip" title="Bấm để đổi ngày thi">📅 Còn ${days} ngày tới kỳ thi</span>`;
+  }
+
   function renderHome() {
     const t = today();
     const d = new Date();
@@ -230,6 +381,8 @@
     const s = streak();
     const totalDays = Object.keys(store.data.checkins).length;
     const quizDone = ci && ci.quiz;
+    const g = gam(), li = levelInfo(g.xp), ms = missionState();
+    const msDone = ms.filter(m => m.done).length;
 
     const dueChips = due.map(id => {
       const c = DATA.chapters.find(x => x.id === id);
@@ -242,10 +395,33 @@
           <h1>Chào Long 👋</h1>
           <div class="sub">${WEEKDAYS[d.getDay()]}, ${fmtVN(t)}</div>
         </div>
-        <div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:10px">
+          ${countdownHtml()}
           ${ci
             ? `<span class="checkin-badge">✅ Đã điểm danh hôm nay</span>`
             : `<button class="btn big" id="checkinBtn">📍 Điểm danh hôm nay</button>`}
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:16px">
+        <h3 style="margin:0 0 12px">🎯 Nhiệm vụ hôm nay — ${msDone}/3${(ci && ci.bonus) ? ' · 🎁 +20 XP bonus' : ''}</h3>
+        <div class="missions">
+          <div class="mission-ring">
+            <svg width="86" height="86" viewBox="0 0 86 86">
+              <circle cx="43" cy="43" r="36" fill="none" stroke="var(--surface2)" stroke-width="9"/>
+              <circle cx="43" cy="43" r="36" fill="none" stroke="var(--green)" stroke-width="9"
+                stroke-linecap="round" stroke-dasharray="${(msDone / 3 * 226.2).toFixed(1)} 226.2"/>
+            </svg>
+            <div class="pct">${msDone}/3</div>
+          </div>
+          <div class="mission-list">
+            ${ms.map(m => `
+              <div class="mission ${m.done ? 'done' : ''}">
+                <span class="tick">${m.done ? '✅' : '⬜'}</span>
+                <span>${esc(m.label)}</span>
+                ${m.go && !m.done ? `<a class="go" href="${m.go}">Làm ngay →</a>` : ''}
+              </div>`).join('')}
+          </div>
         </div>
       </div>
 
@@ -279,6 +455,17 @@
       </div>
 
       <div class="card" style="margin-top:16px">
+        <div class="level-wrap">
+          <div class="level-band">Band ${li.cur.band}</div>
+          <div class="level-info">
+            <div class="name">⭐ ${esc(li.cur.name)} — ${g.xp} XP</div>
+            <div class="xp-bar"><i style="width:${li.pct}%"></i></div>
+            <div class="muted small">${li.next ? 'Còn ' + (li.next.xp - g.xp) + ' XP nữa lên Band ' + li.next.band : 'Cấp tối đa — Huyền thoại!'} · <a href="#/awards">Xem thành tích →</a></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:16px">
         <h3 style="margin:0 0 4px">🔥 Chuỗi ngày học</h3>
         <div class="stat-row">
           <div class="stat"><b>${s}</b><span>chuỗi hiện tại</span></div>
@@ -302,12 +489,23 @@
       </div>
 
       <p class="footer-note">Nguồn: IELTS_Grammar_7_5.md — cập nhật tài liệu chỉ cần thay file và push lại repo.</p>
+
+      <dialog id="examDlg">
+        <h3 style="margin:0 0 10px">🎯 Ngày thi IELTS của bạn</h3>
+        <p class="muted small" style="margin:0 0 12px">Đặt ngày thi để web đếm ngược mỗi ngày — deadline là động lực tốt nhất.</p>
+        <input type="date" id="examInput" class="q-input" value="${g.examDate || ''}">
+        <div class="q-actions" style="margin-top:14px">
+          <button class="btn" id="examSave">Lưu</button>
+          <button class="btn ghost" id="examClear">Bỏ ngày thi</button>
+          <button class="btn ghost" id="examCancel">Đóng</button>
+        </div>
+      </dialog>
     `;
 
     renderHeatmap();
 
     const cb = $('#checkinBtn');
-    if (cb) cb.onclick = () => { ensureCheckin(); updateBestStreak(); store.save(); refreshStreakPill(); renderHome(); };
+    if (cb) cb.onclick = () => { ensureCheckin(); updateBestStreak(); awardBadges(); checkMissionBonus(); store.save(); refreshStreakPill(); renderHome(); };
 
     $('#exportBtn').onclick = exportProgress;
     $('#importBtn').onclick = () => $('#importFile').click();
@@ -318,6 +516,15 @@
         location.reload();
       }
     };
+
+    const chip = $('#examChip');
+    if (chip) chip.onclick = () => { const d = $('#examDlg'); if (d && d.showModal) d.showModal(); };
+    const eSave = $('#examSave');
+    if (eSave) eSave.onclick = () => { const v = $('#examInput').value; if (v) { gam().examDate = v; store.save(); } $('#examDlg').close(); renderHome(); };
+    const eClear = $('#examClear');
+    if (eClear) eClear.onclick = () => { gam().examDate = null; store.save(); $('#examDlg').close(); renderHome(); };
+    const eCancel = $('#examCancel');
+    if (eCancel) eCancel.onclick = () => $('#examDlg').close();
   }
 
   function renderHeatmap() {
@@ -577,17 +784,29 @@
 
     function finish() {
       const total = items.length;
+      const pct = total ? score / total : 0;
+      const c = counters();
+      c.quizzes = (c.quizzes || 0) + 1;
+      c.correct = (c.correct || 0) + score;
+      if (score === total) c.perfect = (c.perfect || 0) + 1;
+      if (pct >= 0.9) c.great = (c.great || 0) + 1;
+      let xpGain;
       if (opts.daily) {
         const ci = ensureCheckin();
         ci.quiz = { score, total };
         applySrsAfterDailyQuiz(score, total);
+        xpGain = 5 * score + (pct >= 0.9 ? 25 : 0);
       } else {
-        ensureCheckin(); // luyện tập cũng tính điểm danh
+        const ci = ensureCheckin(); // luyện tập cũng tính điểm danh
+        ci.extra = true;
+        xpGain = 3 * score;
       }
+      addXp(xpGain, 'quiz');
       updateBestStreak();
+      awardBadges();
+      checkMissionBonus();
       store.save();
       refreshStreakPill();
-      const pct = score / total;
       const emoji = pct >= 0.9 ? '🏆' : pct >= 0.7 ? '🎉' : pct >= 0.5 ? '💪' : '📚';
       const msg = pct >= 0.9 ? 'Xuất sắc! Band 7.5 đang vẫy gọi.'
         : pct >= 0.7 ? 'Tốt lắm! Các chương đến hạn đã được giãn lịch ôn.'
@@ -597,6 +816,7 @@
         <div class="card q-card quiz-done">
           <div class="emoji">${emoji}</div>
           <div class="big-score">${score}/${total}</div>
+          <div class="xp-gain">+${xpGain} XP</div>
           <p>${msg}</p>
           ${opts.daily ? '<p class="checkin-badge">✅ Đã điểm danh hôm nay</p>' : ''}
           <div class="q-actions" style="justify-content:center">
@@ -604,6 +824,7 @@
             <button class="btn ghost" onclick="location.hash='#/'">Về trang chủ</button>
           </div>
         </div>`;
+      if (pct >= 0.7) confetti();
       window.scrollTo(0, 0);
     }
 
@@ -745,13 +966,24 @@
 
     function show() {
       if (cur >= all.length) {
-        ensureCheckin(); updateBestStreak(); store.save(); refreshStreakPill();
+        const ci = ensureCheckin();
+        ci.extra = true;
+        const c = counters();
+        c.cards = (c.cards || 0) + 1;
+        const sesXp = 15 + (known === all.length ? 10 : 0);
+        addXp(sesXp, 'flashcards');
+        updateBestStreak();
+        awardBadges();
+        checkMissionBonus();
+        store.save();
+        refreshStreakPill();
         view().innerHTML = `
           <a class="back-link" href="#/cards">← Chọn bộ thẻ khác</a>
           <div class="card q-card quiz-done">
             <div class="emoji">${known === all.length ? '🏆' : '👏'}</div>
             <h2>Hoàn thành phiên thẻ!</h2>
             <div class="big-score">${known}/${all.length}</div>
+            <div class="xp-gain">+${15 + (known === all.length ? 10 : 0)} XP</div>
             <p class="muted">thẻ bạn đã nhớ</p>
             <div class="q-actions" style="justify-content:center">
               ${missed.length ? `<button class="btn" id="retryMissed">Học lại ${missed.length} thẻ chưa nhớ</button>` : ''}
@@ -841,6 +1073,49 @@
     };
   }
 
+  /* ================= AWARDS ================= */
+  function renderAwards() {
+    const g = gam(), li = levelInfo(g.xp), c = counters();
+    const earned = Object.keys(g.badges).length;
+    view().innerHTML = `
+      <h1 class="page-title">🏅 Thành tích</h1>
+      <div class="card">
+        <div class="level-wrap">
+          <div class="level-band">Band ${li.cur.band}</div>
+          <div class="level-info">
+            <div class="name">⭐ ${esc(li.cur.name)}</div>
+            <div class="xp-bar"><i style="width:${li.pct}%"></i></div>
+            <div class="muted small">${g.xp} XP · ${li.next ? 'Còn ' + (li.next.xp - g.xp) + ' XP nữa lên Band ' + li.next.band + ' — ' + esc(li.next.name) : 'Cấp tối đa!'}</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:16px">
+        <h3 style="margin:0 0 4px">📊 Số liệu tích lũy</h3>
+        <div class="stat-row">
+          <div class="stat"><b>${g.xp}</b><span>tổng XP</span></div>
+          <div class="stat"><b>${Object.keys(store.data.checkins).length}</b><span>ngày đã học</span></div>
+          <div class="stat"><b>${learnedIds().length}/${numberedChapters().length}</b><span>chương</span></div>
+          <div class="stat"><b>${c.quizzes || 0}</b><span>quiz đã làm</span></div>
+          <div class="stat"><b>${c.correct || 0}</b><span>câu đúng</span></div>
+          <div class="stat"><b>${c.cards || 0}</b><span>phiên thẻ</span></div>
+        </div>
+      </div>
+
+      <h2 style="margin:26px 0 12px">Huy hiệu — ${earned}/${BADGES.length}</h2>
+      <div class="badge-grid">
+        ${BADGES.map(b => {
+          const got = g.badges[b.id];
+          return `<div class="badge ${got ? 'earned' : 'locked'}">
+            <div class="ic">${b.ic}</div>
+            <div class="nm">${esc(b.nm)}</div>
+            <div class="ds">${esc(b.ds)}</div>
+            ${got ? `<div class="dt">✓ Đạt ngày ${fmtVN(got)}</div>` : '<div class="dt" style="color:var(--muted)">🔒 Chưa mở</div>'}
+          </div>`;
+        }).join('')}
+      </div>`;
+  }
+
   /* ================= boot ================= */
   function applyTheme() {
     document.documentElement.dataset.theme = store.data.settings.theme || 'dark';
@@ -872,9 +1147,11 @@
         route(/^\/cards$/, renderDecks);
         route(/^\/ex\/(\w+)$/, renderExSet);
         route(/^\/ex$/, renderExList);
+        route(/^\/awards$/, renderAwards);
 
         window.addEventListener('hashchange', navigate);
         refreshStreakPill();
+        refreshXpPill();
         navigate();
       })
       .catch(err => {

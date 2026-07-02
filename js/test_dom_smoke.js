@@ -9,7 +9,7 @@ const mdText = fs.readFileSync(path.join(__dirname, '..', 'IELTS_Grammar_7_5.md'
 
 /* ---------- DOM giả lập ---------- */
 const headerHTML = `
-  <span id="streakPill"></span><button id="themeBtn"></button>
+  <span id="streakPill"></span><button id="themeBtn"></button><span id="xpPill"></span>
   <a data-route="home"></a><a data-route="learn"></a><a data-route="quiz"></a><a data-route="cards"></a><a data-route="ex"></a>`;
 let htmlLog = headerHTML; // toàn bộ HTML "đang hiển thị"
 let era = 0;
@@ -22,8 +22,8 @@ function makeStub(extra, isView) {
     style: {}, dataset: {}, classList: { toggle() {}, add() {}, remove() {} },
     onclick: null, oninput: null, onblur: null, onkeydown: null, onchange: null,
     disabled: false, value: '', textContent: '', scrollLeft: 0, scrollWidth: 0,
-    focus() {}, click() {}, scrollIntoView() {},
-    files: [],
+    focus() {}, click() {}, scrollIntoView() {}, remove() {}, appendChild() {},
+    files: [], className: '',
     querySelectorAll(sel) { return queryAllIn(this._inner, sel); },
   };
   Object.defineProperty(el, 'innerHTML', {
@@ -88,6 +88,7 @@ const window = {
 };
 const document = {
   documentElement: { dataset: {} },
+  body: makeStub(),
   querySelector(sel) { return sel[0] === '#' ? byId(sel.slice(1)) : (countIn(htmlLog, sel) ? queryAllIn(htmlLog, sel)[0] : null); },
   querySelectorAll(sel) { return queryAllIn(htmlLog, sel); },
   getElementById(id) { return byId(id); },
@@ -191,10 +192,22 @@ function goto(hash) { location.hash = hash; listeners.hashchange(); }
   goto('#/ex/F1');
   check('bài F1 render', htmlLog.includes('Viết lại câu'));
 
+  // AWARDS
+  goto('#/awards');
+  check('trang thành tích render', htmlLog.includes('Huy hiệu') && htmlLog.includes('Band'));
+  check('có huy hiệu đã mở', htmlLog.includes('badge earned'), (htmlLog.match(/badge earned/g) || []).length + ' earned');
+
   // HOME sau khi học
   goto('#/');
   check('home: quiz đã xong hiển thị', htmlLog.includes('Đã hoàn thành:'));
   check('home: streak >= 1', htmlLog.includes('Đã điểm danh hôm nay'));
+  check('home: nhiệm vụ ngày hiển thị', htmlLog.includes('Nhiệm vụ hôm nay'));
+  check('home: 3/3 nhiệm vụ xong', htmlLog.includes('3/3'), (htmlLog.match(/Nhiệm vụ hôm nay — \d\/3/) || [''])[0]);
+  check('home: nút đặt ngày thi', htmlLog.includes('Đặt ngày thi'));
+  check('home: thẻ cấp độ Band', htmlLog.includes('level-band'));
+  const st2 = JSON.parse(localStorage._d.ielts75_v1);
+  check('XP tích lũy > 0', st2.gam && st2.gam.xp > 0, 'xp=' + (st2.gam && st2.gam.xp));
+  check('có huy hiệu trong store', Object.keys(st2.gam.badges).length >= 1, Object.keys(st2.gam.badges).join(','));
 
   console.log(fails === 0 ? '\nALL PASS (' + steps + ' quiz steps)' : '\n' + fails + ' FAILED');
   process.exit(fails ? 1 : 0);
