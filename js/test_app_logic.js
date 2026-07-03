@@ -20,7 +20,8 @@ const fn = new Function('P', 'DATA', 'localStorage', 'console',
   'function refreshStreakPill(){}\nfunction refreshXpPill(){}\nfunction toast(){}\nfunction confetti(){}\nconst document = { querySelector: () => null, querySelectorAll: () => [] };\n' + logic + `
   return { dstr, addDays, store, streak, isCheckedIn, ensureCheckin, markLearned, dueChapters, todayChapter,
            applySrsAfterDailyQuiz, buildQuiz, dailyQuizScope, today, chNumById, updateBestStreak,
-           gam, counters, addXp, levelInfo, awardBadges, missionState, checkMissionBonus };
+           gam, counters, addXp, levelInfo, awardBadges, missionState, checkMissionBonus,
+           recordItem, prioritize, reviewStats, addVocab, delVocab, dueVocabList, vocabList };
 `);
 const A = fn(P, DATA, localStorage, console);
 
@@ -117,6 +118,43 @@ A.store.data.checkins = {}; A.store.data.gam.counters = {};
 A.store.data.checkins[A.addDays(t, -10)] = {};
 A.ensureCheckin();
 check('comeback flag sau nghỉ dài', A.counters().comeback === true);
+
+// ===== SRS từng mục + từ vựng =====
+A.store.data.items = {};
+A.recordItem('itemX', true);
+check('recordItem đúng: box 1, hạn +2 ngày', A.store.data.items.itemX.b === 1 && A.store.data.items.itemX.n === A.addDays(t, 2),
+  JSON.stringify(A.store.data.items.itemX));
+A.recordItem('itemX', true);
+check('đúng tiếp: box 2, hạn +4 ngày', A.store.data.items.itemX.b === 2 && A.store.data.items.itemX.n === A.addDays(t, 4));
+A.recordItem('itemX', false);
+check('sai: về box 0, mai ôn lại', A.store.data.items.itemX.b === 0 && A.store.data.items.itemX.n === A.addDays(t, 1));
+
+const rs = A.reviewStats();
+check('reviewStats tổng >= 250 mục', rs.total >= 250, '=' + rs.total);
+check('reviewStats seen đếm đúng', rs.seen === 0, 'seen=' + rs.seen + ' (itemX không thuộc tài liệu)');
+
+// prioritize: mục due lên đầu
+const fakePool = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+A.store.data.items = { b: { b: 1, n: t, s: 1, c: 1 }, c: { b: 2, n: A.addDays(t, 5), s: 1, c: 1 } };
+const ordered = A.prioritize(fakePool, P.seededRng('x'));
+check('prioritize: due → unseen → rest', ordered[0].id === 'b' && ordered[1].id === 'a' && ordered[2].id === 'c',
+  ordered.map(o => o.id).join(','));
+
+// vocab
+A.store.data.vocab = []; A.store.data.items = {};
+const xpV = A.gam().xp;
+const v1 = A.addVocab('ubiquitous', 'có mặt khắp nơi', 'Smartphones are ubiquitous.');
+check('thêm từ ok +2 XP', v1 && A.vocabList().length === 1 && A.gam().xp === xpV + 2);
+const v2 = A.addVocab('Ubiquitous', 'phổ biến khắp nơi', '');
+check('trùng từ → cập nhật nghĩa, không nhân đôi', A.vocabList().length === 1 && A.vocabList()[0].m === 'phổ biến khắp nơi');
+check('từ mới nằm trong danh sách đến hạn', A.dueVocabList().length === 1);
+A.recordItem(v1.id, true);
+check('ôn xong hết đến hạn', A.dueVocabList().length === 0);
+A.delVocab(v1.id);
+check('xóa từ ok', A.vocabList().length === 0);
+A.counters().vocabAdded = 50;
+A.awardBadges();
+check('huy hiệu vocab50 mở', !!A.gam().badges.vocab50);
 
 console.log(fails === 0 ? '\nALL PASS' : '\n' + fails + ' FAILED');
 process.exit(fails ? 1 : 0);

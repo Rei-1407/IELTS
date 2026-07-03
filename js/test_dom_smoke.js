@@ -194,6 +194,33 @@ function goto(hash) { location.hash = hash; listeners.hashchange(); }
   goto('#/ex/F1');
   check('bài F1 render', htmlLog.includes('Viết lại câu'));
 
+  // VOCAB
+  goto('#/vocab');
+  check('trang từ vựng render', htmlLog.includes('Sổ từ vựng') && idPresent('vocabAdd'));
+  byId('vw').value = 'ubiquitous';
+  byId('vm').value = 'có mặt khắp nơi';
+  byId('vex').value = '';
+  byId('vocabSearch').value = '';
+  byId('vocabAdd').onclick();
+  check('thêm từ hiển thị trong danh sách', htmlLog.includes('ubiquitous'));
+  const stV = JSON.parse(localStorage._d.ielts75_v1);
+  check('từ lưu vào store', stV.vocab && stV.vocab.length === 1, JSON.stringify(stV.vocab));
+  goto('#/cards');
+  check('deck từ vựng xuất hiện', htmlLog.includes('Sổ từ vựng của bạn'));
+  goto('#/cards/vocab');
+  let vSteps = 0;
+  while (!htmlLog.includes('Hoàn thành phiên thẻ') && vSteps < 5) {
+    vSteps++;
+    const fc = byId('fc');
+    if (!fc) break;
+    fc.onclick();
+    byId('fcYes').onclick();
+  }
+  check('ôn hết deck từ vựng (1 thẻ)', htmlLog.includes('Hoàn thành phiên thẻ'), 'steps=' + vSteps);
+  const stV2 = JSON.parse(localStorage._d.ielts75_v1);
+  const vId = stV2.vocab[0].id;
+  check('SRS ghi nhận từ đã ôn', stV2.items && stV2.items[vId] && stV2.items[vId].b === 1, JSON.stringify(stV2.items && stV2.items[vId]));
+
   // AWARDS
   goto('#/awards');
   check('trang thành tích render', htmlLog.includes('Huy hiệu') && htmlLog.includes('Band'));
@@ -207,6 +234,10 @@ function goto(hash) { location.hash = hash; listeners.hashchange(); }
   check('home: 3/3 nhiệm vụ xong', htmlLog.includes('3/3'), (htmlLog.match(/Nhiệm vụ hôm nay — \d\/3/) || [''])[0]);
   check('home: nút đặt ngày thi', htmlLog.includes('Đặt ngày thi'));
   check('home: thẻ cấp độ Band', htmlLog.includes('level-band'));
+  check('home: thẻ ghi nhớ tài liệu', htmlLog.includes('Ghi nhớ tài liệu') && htmlLog.includes('Thuộc'));
+  check('home: thẻ sổ từ vựng', htmlLog.includes('Sổ từ vựng'));
+  const stI2 = JSON.parse(localStorage._d.ielts75_v1);
+  check('items SRS có dữ liệu sau quiz+thẻ', Object.keys(stI2.items || {}).length >= 25, '=' + Object.keys(stI2.items || {}).length);
   const st2 = JSON.parse(localStorage._d.ielts75_v1);
   check('XP tích lũy > 0', st2.gam && st2.gam.xp > 0, 'xp=' + (st2.gam && st2.gam.xp));
   check('có huy hiệu trong store', Object.keys(st2.gam.badges).length >= 1, Object.keys(st2.gam.badges).join(','));

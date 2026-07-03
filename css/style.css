@@ -133,8 +133,8 @@ h1.page-title { font-size: 26px; margin: 4px 0 18px; }
 .stat b { font-size: 24px; display: block; line-height: 1.2; }
 .stat span { color: var(--muted); font-size: 13px; }
 
-.today-card h3, .quiz-card h3 { margin: 0 0 6px; font-size: 15px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .4px; }
-.today-card .title { font-size: 20px; font-weight: 700; margin-bottom: 12px; }
+.today-card h3, .quiz-card h3, .review-card h3, .vocab-card h3 { margin: 0 0 6px; font-size: 15px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .4px; }
+.today-card .title, .review-card .title, .vocab-card .title { font-size: 20px; font-weight: 700; margin-bottom: 12px; }
 .progressbar { height: 8px; background: var(--surface2); border-radius: 99px; overflow: hidden; margin: 10px 0 14px; }
 .progressbar i { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--green)); border-radius: 99px; transition: width .4s; }
 
@@ -394,3 +394,19 @@ body.resizing { cursor: col-resize; user-select: none; }
 
 /* XP gain line trên màn kết quả */
 .xp-gain { color: var(--amber); font-weight: 700; margin: 6px 0 2px; }
+
+/* ---------- Vocab ---------- */
+.vocab-form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.vocab-form .full { grid-column: 1 / -1; }
+.vocab-form textarea { resize: vertical; font-family: inherit; }
+.vocab-item {
+  display: flex; align-items: baseline; gap: 14px;
+  padding: 11px 4px; border-bottom: 1px solid var(--border);
+}
+.vocab-item:last-child { border-bottom: none; }
+.vocab-item .w { font-weight: 700; min-width: 180px; color: var(--accent); }
+.vocab-item .m { flex: 1; }
+.vocab-item .meta { white-space: nowrap; }
+.vocab-item .due-tag { color: var(--amber); font-weight: 600; }
+.vocab-item .edit, .vocab-item .del { cursor: pointer; opacity: .55; transition: .15s; }
+.vocab-item .edit:hover, .vocab-item .del:hover { opacity: 1; }

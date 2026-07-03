@@ -40,7 +40,7 @@
   /* ================= store ================= */
   const KEY = 'ielts75_v1';
   const store = {
-    data: { settings: { theme: 'dark', lastChapter: 'c1' }, checkins: {}, chapters: {}, best: { streak: 0 }, gam: { xp: 0, examDate: null, badges: {}, counters: {} } },
+    data: { settings: { theme: 'dark', lastChapter: 'c1' }, checkins: {}, chapters: {}, best: { streak: 0 }, gam: { xp: 0, examDate: null, badges: {}, counters: {} }, items: {}, vocab: [] },
     load() {
       try {
         const raw = localStorage.getItem(KEY);
@@ -49,6 +49,8 @@
           this.data = Object.assign(this.data, d);
           this.data.settings = Object.assign({ theme: 'dark', lastChapter: 'c1' }, d.settings || {});
           this.data.gam = Object.assign({ xp: 0, examDate: null, badges: {}, counters: {} }, d.gam || {});
+          if (!this.data.items) this.data.items = {};
+          if (!this.data.vocab) this.data.vocab = [];
         }
       } catch (e) { console.warn('store load', e); }
     },
@@ -142,6 +144,87 @@
     });
   }
 
+  /* ================= SRS từng mục (Leitner) + từ vựng ================= */
+  const BOX_DAYS = [1, 2, 4, 7, 15, 30]; // box 0..5
+
+  function itemsStore() {
+    if (!store.data.items) store.data.items = {};
+    return store.data.items;
+  }
+
+  // Ghi kết quả 1 mục: đúng → lên box, giãn lịch; sai → về box 0, mai ôn lại
+  function recordItem(id, ok) {
+    if (!id) return;
+    const st = itemsStore();
+    const e = st[id] || { b: 0, s: 0, c: 0, n: today() };
+    e.s = (e.s || 0) + 1;
+    if (ok) { e.c = (e.c || 0) + 1; e.b = Math.min((e.b || 0) + 1, 5); }
+    else e.b = 0;
+    e.n = addDays(today(), BOX_DAYS[e.b]);
+    st[id] = e;
+    store.save();
+  }
+
+  // Sắp xếp pool ôn tập: đến hạn → chưa gặp → còn lại (trộn trong từng nhóm)
+  function prioritize(arr, rng, idFn) {
+    const t = today(), st = itemsStore();
+    const due = [], unseen = [], rest = [];
+    arr.forEach(x => {
+      const e = st[idFn ? idFn(x) : x.id];
+      if (!e) unseen.push(x);
+      else if (e.n <= t) due.push(x);
+      else rest.push(x);
+    });
+    return P.shuffled(due, rng).concat(P.shuffled(unseen, rng), P.shuffled(rest, rng));
+  }
+
+  // Độ phủ tài liệu: tổng mục có thể ôn / đã gặp / đã thuộc (box >= 3) / đến hạn
+  function reviewStats() {
+    const ids = [];
+    DATA.pairs.forEach(p => ids.push(p.id));
+    DATA.formulas.forEach(f => ids.push(f.id));
+    DATA.verbs.forEach(v => ids.push(v.id));
+    DATA.exercises.forEach(set => set.items.forEach(it => { if (it.a) ids.push(it.id); }));
+    const t = today(), st = itemsStore();
+    let seen = 0, known = 0, due = 0;
+    ids.forEach(id => {
+      const e = st[id];
+      if (e) { seen++; if ((e.b || 0) >= 3) known++; if (e.n <= t) due++; }
+    });
+    return { total: ids.length, seen, known, due };
+  }
+
+  /* ----- sổ từ vựng ----- */
+  function vocabList() {
+    if (!store.data.vocab) store.data.vocab = [];
+    return store.data.vocab;
+  }
+  function addVocab(w, m, ex) {
+    w = (w || '').trim(); m = (m || '').trim(); ex = (ex || '').trim();
+    if (!w || !m) return null;
+    const id = 'w' + P.hash(w.toLowerCase());
+    const list = vocabList();
+    const existing = list.find(v => v.id === id);
+    if (existing) { existing.m = m; if (ex) existing.ex = ex; store.save(); return existing; }
+    const v = { id, w, m, ex, addedOn: today() };
+    list.push(v);
+    const c = counters();
+    c.vocabAdded = (c.vocabAdded || 0) + 1;
+    addXp(2, 'thêm từ');
+    awardBadges();
+    store.save();
+    return v;
+  }
+  function delVocab(id) {
+    store.data.vocab = vocabList().filter(v => v.id !== id);
+    store.save();
+  }
+  // Từ đến hạn ôn (từ mới chưa ôn lần nào cũng tính là đến hạn)
+  function dueVocabList() {
+    const t = today(), st = itemsStore();
+    return vocabList().filter(v => { const e = st[v.id]; return !e || e.n <= t; });
+  }
+
   /* ================= gamification ================= */
   const LEVELS = [
     { band: '3.0', name: 'Khởi động', xp: 0 },
@@ -201,6 +284,8 @@
     { id: 'early', ic: '🌅', nm: 'Chim sớm', ds: 'Điểm danh trước 7 giờ sáng', test: c => !!c.early },
     { id: 'night', ic: '🦉', nm: 'Cú đêm', ds: 'Điểm danh sau 23 giờ', test: c => !!c.night },
     { id: 'comeback', ic: '💪', nm: 'Trở lại lợi hại hơn', ds: 'Quay lại học sau khi nghỉ 3 ngày trở lên', test: c => !!c.comeback },
+    { id: 'vocab50', ic: '📚', nm: 'Kho từ vựng', ds: 'Thêm 50 từ vào sổ từ vựng', test: c => (c.vocabAdded || 0) >= 50 },
+    { id: 'known100', ic: '🗝️', nm: 'Khắc cốt ghi tâm', ds: 'Thuộc 100 mục kiến thức (box 3+)', test: () => reviewStats().known >= 100 },
   ];
   function awardBadges() {
     const g = gam();
@@ -237,7 +322,7 @@
   /* ================= xây quiz ================= */
   function chNumById(id) { const c = DATA.chapters.find(x => x.id === id); return c ? c.num : null; }
 
-  function buildQuiz(seedStr, scopeNums, n) {
+  function buildQuiz(seedStr, scopeNums, n, withVocab) {
     n = n || 10;
     const rng = P.seededRng(seedStr);
     const inScope = ch => !scopeNums || scopeNums.has(ch);
@@ -249,11 +334,12 @@
       if (it.a) exAll.push({ set, it });
     }));
 
-    const pairsIn = P.shuffled(pairsAll.filter(p => inScope(p.chapter)), rng);
+    // ưu tiên: mục đến hạn ôn → mục chưa gặp → còn lại
+    const pairsIn = prioritize(pairsAll.filter(p => inScope(p.chapter)), rng);
     const pairsOut = P.shuffled(pairsAll.filter(p => !inScope(p.chapter)), rng);
-    const formIn = P.shuffled(formulasAll.filter(f => inScope(f.chapter)), rng);
+    const formIn = prioritize(formulasAll.filter(f => inScope(f.chapter)), rng);
     const formOut = P.shuffled(formulasAll.filter(f => !inScope(f.chapter)), rng);
-    const exIn = P.shuffled(exAll.filter(e => e.set.chapterRefs.length && e.set.chapterRefs.some(inScope)), rng);
+    const exIn = prioritize(exAll.filter(e => e.set.chapterRefs.length && e.set.chapterRefs.some(inScope)), rng, e => e.it.id);
     const exOut = P.shuffled(exAll.filter(e => !(e.set.chapterRefs.length && e.set.chapterRefs.some(inScope))), rng);
 
     function take(inArr, outArr, k) {
@@ -276,8 +362,13 @@
       if (c) { items.push({ kind: 'cloze', f, c }); usedForCloze.add(f.id); clozeCount++; }
     }
     const cardPool = take(formIn, formOut, 10).filter(f => !usedForCloze.has(f.id));
-    cardPool.slice(0, 2).forEach(f => items.push({ kind: 'card', front: f.front, back: f.back, sub: 'Chương ' + f.chapter }));
+    cardPool.slice(0, 2).forEach(f => items.push({ kind: 'card', id: f.id, front: f.front, back: f.back, sub: 'Chương ' + f.chapter }));
     take(exIn, exOut, 2).forEach(e => items.push({ kind: 'ex', set: e.set, it: e.it }));
+
+    // trộn từ vựng đến hạn vào quiz (tối đa 2 từ)
+    if (withVocab) {
+      P.shuffled(dueVocabList(), rng).slice(0, 2).forEach(v => items.push({ kind: 'vcard', v }));
+    }
 
     // bù nếu thiếu
     let idx = 4;
@@ -314,7 +405,7 @@
   }
   function highlightNav(h) {
     const root = h.split('/')[1] || 'home';
-    const map = { '': 'home', learn: 'learn', quiz: 'quiz', cards: 'cards', ex: 'ex', awards: 'awards' };
+    const map = { '': 'home', learn: 'learn', quiz: 'quiz', cards: 'cards', ex: 'ex', awards: 'awards', vocab: 'vocab' };
     document.querySelectorAll('.nav a').forEach(a => {
       a.classList.toggle('active', a.dataset.route === (map[root] || 'home'));
     });
@@ -382,6 +473,7 @@
     const totalDays = Object.keys(store.data.checkins).length;
     const quizDone = ci && ci.quiz;
     const g = gam(), li = levelInfo(g.xp), ms = missionState();
+    const rs = reviewStats();
     const msDone = ms.filter(m => m.done).length;
 
     const dueChips = due.map(id => {
@@ -452,6 +544,26 @@
                <div class="q-actions"><button class="btn green" onclick="location.hash='#/quiz'">Làm quiz ngay →</button></div>`}
           ${due.length ? `<div class="due-chips">${dueChips}</div>` : ''}
         </div>
+
+        <div class="card review-card">
+          <h3>🧠 Ghi nhớ tài liệu</h3>
+          <div class="title">Thuộc ${rs.known}/${rs.total} mục</div>
+          <div class="progressbar"><i style="width:${rs.total ? Math.round(rs.known / rs.total * 100) : 0}%"></i></div>
+          <div class="muted small">Đã gặp ${rs.seen}/${rs.total} · ${rs.due ? '⏰ ' + rs.due + ' mục đến hạn ôn hôm nay' : 'Không có mục nào đến hạn'}</div>
+          <div class="q-actions">
+            <button class="btn ${rs.due ? '' : 'ghost'}" onclick="location.hash='#/quiz/practice'">↻ Ôn ngay 10 câu</button>
+          </div>
+        </div>
+
+        <div class="card vocab-card">
+          <h3>📚 Sổ từ vựng</h3>
+          <div class="title">${vocabList().length} từ · ${dueVocabList().length} đến hạn</div>
+          <div class="muted small">Gặp từ hay ở đâu cứ ném vào đây — web sẽ nhắc bạn ôn đúng lúc.</div>
+          <div class="q-actions">
+            <button class="btn ghost" onclick="location.hash='#/vocab'">+ Thêm từ</button>
+            ${vocabList().length ? `<button class="btn" onclick="location.hash='#/cards/vocab'">🃏 Ôn từ vựng</button>` : ''}
+          </div>
+        </div>
       </div>
 
       <div class="card" style="margin-top:16px">
@@ -511,7 +623,7 @@
     $('#importBtn').onclick = () => $('#importFile').click();
     $('#importFile').onchange = importProgress;
     $('#resetBtn').onclick = () => {
-      if (confirm('Xoá toàn bộ tiến độ (điểm danh, chương đã học)? Không thể hoàn tác.')) {
+      if (confirm('Xoá toàn bộ tiến độ (điểm danh, chương đã học, từ vựng, XP)? Không thể hoàn tác.')) {
         localStorage.removeItem(KEY);
         location.reload();
       }
@@ -767,7 +879,7 @@
       return;
     }
     const scope = dailyQuizScope();
-    const items = buildQuiz('daily-' + t, scope, 10);
+    const items = buildQuiz('daily-' + t, scope, 10, true);
     runQuiz(items, { daily: true });
   }
 
@@ -780,12 +892,13 @@
       scope = new Set(learnedIds().map(chNumById).filter(Boolean));
       label = 'các chương đã học';
     }
-    const items = buildQuiz('practice-' + Date.now(), scope, 10);
+    const items = buildQuiz('practice-' + Date.now(), scope, 10, true);
     runQuiz(items, { practice: true, label });
   }
 
   function runQuiz(items, opts) {
     let cur = 0, score = 0;
+    const itemId = q => q.kind === 'mcq' ? q.pair.id : q.kind === 'cloze' ? q.f.id : q.kind === 'ex' ? q.it.id : q.kind === 'vcard' ? q.v.id : q.id;
     const results = new Array(items.length).fill(null);
 
     function progressHtml() {
@@ -886,6 +999,14 @@
           <div id="revealZone">
             <div class="q-actions"><button class="btn" id="revealBtn">Hiện đáp án</button></div>
           </div>`;
+      } else if (q.kind === 'vcard') {
+        body = `
+          <div class="q-type">📚 Ôn từ vựng của bạn</div>
+          <div class="q-text">${esc(q.v.w)}</div>
+          <p class="muted small">Từ này nghĩa là gì? Nhớ lại rồi đối chiếu.</p>
+          <div id="revealZone">
+            <div class="q-actions"><button class="btn" id="revealBtn">Hiện nghĩa</button></div>
+          </div>`;
       } else if (q.kind === 'ex') {
         body = `
           <div class="q-type">Bài tập — ${esc(q.set.title)}</div>
@@ -903,6 +1024,7 @@
           btn.onclick = () => {
             const i = +btn.dataset.i;
             const ok = q.opts[i].correct;
+            recordItem(itemId(q), ok);
             document.querySelectorAll('.q-opt').forEach((b, j) => {
               b.disabled = true;
               if (q.opts[j].correct) b.classList.add('correct');
@@ -924,6 +1046,7 @@
         input.focus();
         const check = () => {
           const ok = P.clozeMatch(input.value, q.c.answer);
+          recordItem(itemId(q), ok);
           input.disabled = true;
           $('#checkBtn').style.display = 'none';
           $('#qFeedback').innerHTML = `
@@ -937,9 +1060,11 @@
         };
         $('#checkBtn').onclick = check;
         input.onkeydown = e => { if (e.key === 'Enter' && !input.disabled) check(); };
-      } else if (q.kind === 'card' || q.kind === 'ex') {
+      } else if (q.kind === 'card' || q.kind === 'ex' || q.kind === 'vcard') {
         $('#revealBtn').onclick = () => {
-          const ansHtml = q.kind === 'card' ? esc(q.back) : miniMd(q.it.a);
+          const ansHtml = q.kind === 'card' ? esc(q.back)
+            : q.kind === 'vcard' ? esc(q.v.m) + (q.v.ex ? '<br><em class="muted">' + esc(q.v.ex) + '</em>' : '')
+            : miniMd(q.it.a);
           $('#revealZone').innerHTML = `
             <div class="q-answer-reveal">📌 ${ansHtml}</div>
             <p class="muted small" style="margin:12px 0 6px">Bạn có làm đúng / nhớ được không?</p>
@@ -947,8 +1072,8 @@
               <button class="btn green" id="yesBtn">✓ Đúng / Nhớ</button>
               <button class="btn red" id="noBtn">✗ Sai / Chưa nhớ</button>
             </div>`;
-          $('#yesBtn').onclick = () => next(true);
-          $('#noBtn').onclick = () => next(false);
+          $('#yesBtn').onclick = () => { recordItem(itemId(q), true); next(true); };
+          $('#noBtn').onclick = () => { recordItem(itemId(q), false); next(false); };
         };
       }
     }
@@ -962,6 +1087,7 @@
       { id: 'formulas', icon: '🧮', name: 'Công thức ngữ pháp', desc: 'Thì, câu điều kiện, cấu trúc… tự trích từ tài liệu.', count: DATA.formulas.length },
       { id: 'verbs', icon: '🔤', name: 'Động từ bất quy tắc', desc: 'V1 → V2 / V3 + nghĩa tiếng Việt (Phụ lục A).', count: DATA.verbs.length },
       { id: 'pairs', icon: '🩹', name: 'Sửa câu sai', desc: 'Nhìn câu sai kinh điển → nhớ lại câu đúng.', count: DATA.pairs.length },
+      { id: 'vocab', icon: '📚', name: 'Sổ từ vựng của bạn', desc: vocabList().length ? dueVocabList().length + ' từ đến hạn ôn hôm nay.' : 'Chưa có từ nào — vào tab Từ vựng để thêm.', count: vocabList().length },
     ];
     view().innerHTML = `
       <h1 class="page-title">🃏 Flashcards</h1>
@@ -977,14 +1103,16 @@
   }
 
   function deckCards(deckId) {
-    if (deckId === 'formulas') return DATA.formulas.map(f => ({ front: f.front, back: f.back, sub: 'Chương ' + f.chapter }));
-    if (deckId === 'verbs') return DATA.verbs.map(v => ({ front: v.v1 + (v.meaning ? ' — ' + v.meaning : ''), back: 'V2: ' + v.v2 + '\nV3: ' + v.v3, sub: 'Động từ bất quy tắc' }));
-    if (deckId === 'pairs') return DATA.pairs.map(p => ({ front: '❌ ' + p.wrong, back: '✅ ' + p.right + (p.note ? '\n💡 ' + p.note : ''), sub: 'Chương ' + p.chapter }));
+    if (deckId === 'formulas') return DATA.formulas.map(f => ({ id: f.id, front: f.front, back: f.back, sub: 'Chương ' + f.chapter }));
+    if (deckId === 'verbs') return DATA.verbs.map(v => ({ id: v.id, front: v.v1 + (v.meaning ? ' — ' + v.meaning : ''), back: 'V2: ' + v.v2 + '\nV3: ' + v.v3, sub: 'Động từ bất quy tắc' }));
+    if (deckId === 'pairs') return DATA.pairs.map(p => ({ id: p.id, front: '❌ ' + p.wrong, back: '✅ ' + p.right + (p.note ? '\n💡 ' + p.note : ''), sub: 'Chương ' + p.chapter }));
+    if (deckId === 'vocab') return vocabList().map(v => ({ id: v.id, front: v.w, back: v.m + (v.ex ? '\n*' + v.ex + '*' : ''), sub: 'Sổ từ vựng' }));
     return [];
   }
 
   function renderDeck(deckId, cardsOverride) {
-    const all = cardsOverride || P.shuffled(deckCards(deckId), P.seededRng(String(Date.now()))).slice(0, 20);
+    const rngD = P.seededRng(String(Date.now()));
+    const all = cardsOverride || prioritize(deckCards(deckId), rngD).slice(0, 20); // đến hạn & chưa gặp lên trước
     if (!all.length) { location.hash = '#/cards'; return; }
     let cur = 0, known = 0;
     const missed = [];
@@ -1042,8 +1170,8 @@
         </div>`;
       const fc = $('#fc');
       fc.onclick = () => { fc.classList.toggle('flipped'); $('#fcControls').style.visibility = 'visible'; };
-      $('#fcYes').onclick = () => { known++; cur++; show(); };
-      $('#fcNo').onclick = () => { missed.push(c); cur++; show(); };
+      $('#fcYes').onclick = () => { recordItem(c.id, true); known++; cur++; show(); };
+      $('#fcNo').onclick = () => { recordItem(c.id, false); missed.push(c); cur++; show(); };
     }
     show();
   }
@@ -1098,6 +1226,111 @@
     };
   }
 
+  /* ================= VOCAB ================= */
+  function renderVocab(filter) {
+    const list = vocabList();
+    const dueSet = new Set(dueVocabList().map(v => v.id));
+    const q = (filter || '').toLowerCase();
+    const shown = list
+      .filter(v => !q || v.w.toLowerCase().includes(q) || v.m.toLowerCase().includes(q))
+      .sort((a, b) => (dueSet.has(b.id) - dueSet.has(a.id)) || (b.addedOn > a.addedOn ? 1 : -1));
+    const stI = itemsStore();
+
+    view().innerHTML = `
+      <h1 class="page-title">📚 Sổ từ vựng</h1>
+      <div class="grid cols2">
+        <div class="card">
+          <h3 style="margin:0 0 10px">➕ Thêm từ mới <span class="muted small">(+2 XP mỗi từ)</span></h3>
+          <div class="vocab-form">
+            <input class="q-input" id="vw" placeholder="Từ / cụm từ (vd: ubiquitous)">
+            <input class="q-input" id="vm" placeholder="Nghĩa (vd: có mặt khắp nơi)">
+            <input class="q-input full" id="vex" placeholder="Ví dụ (không bắt buộc)">
+            <div class="full q-actions" style="margin:0">
+              <button class="btn green" id="vocabAdd">Thêm vào sổ</button>
+              <button class="btn ghost sm" id="bulkToggle">📋 Thêm nhiều từ một lúc</button>
+            </div>
+            <div class="full" id="bulkZone" style="display:none">
+              <textarea class="q-input" id="bulkText" rows="5" placeholder="Mỗi dòng một từ, dạng:&#10;word: nghĩa&#10;word - nghĩa"></textarea>
+              <div class="q-actions"><button class="btn" id="bulkAdd">Nhập tất cả</button></div>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <h3 style="margin:0 0 10px">🃏 Ôn tập</h3>
+          <div class="stat-row">
+            <div class="stat"><b>${list.length}</b><span>từ trong sổ</span></div>
+            <div class="stat"><b>${dueSet.size}</b><span>đến hạn hôm nay</span></div>
+            <div class="stat"><b>${list.filter(v => (stI[v.id] || {}).b >= 3).length}</b><span>đã thuộc (box 3+)</span></div>
+          </div>
+          <div class="q-actions">
+            ${list.length ? `<button class="btn" onclick="location.hash='#/cards/vocab'">Ôn flashcard ngay →</button>` : '<span class="muted small">Thêm từ trước đã nhé!</span>'}
+          </div>
+          <p class="muted small" style="margin-bottom:0">Từ đến hạn cũng tự chen vào Quiz ngày (tối đa 2 từ/quiz).</p>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:16px">
+        <div class="searchbox" style="max-width:340px">
+          <input type="search" id="vocabSearch" placeholder="🔍 Lọc từ…" value="${esc(filter || '')}" autocomplete="off">
+        </div>
+        <div id="vocabListZone">
+          ${shown.length ? shown.map(v => {
+            const e = stI[v.id];
+            const box = e ? (e.b || 0) : -1;
+            return `<div class="vocab-item">
+              <span class="w">${esc(v.w)}</span>
+              <span class="m">${esc(v.m)}${v.ex ? `<br><em class="muted small">${esc(v.ex)}</em>` : ''}</span>
+              <span class="meta small ${dueSet.has(v.id) ? 'due-tag' : 'muted'}">${dueSet.has(v.id) ? '⏰ đến hạn' : 'box ' + box + ' · ôn ' + fmtVN(e.n)}</span>
+              <span class="edit" data-id="${v.id}" title="Sửa (nạp lại vào form)">✏️</span>
+              <span class="del" data-id="${v.id}" title="Xóa">🗑</span>
+            </div>`;
+          }).join('') : '<p class="muted">Chưa có từ nào' + (q ? ' khớp bộ lọc' : '') + '.</p>'}
+        </div>
+      </div>`;
+
+    const doAdd = () => {
+      const w = $('#vw').value, m = $('#vm').value, ex = $('#vex').value;
+      if (!w.trim() || !m.trim()) { alert('Cần nhập cả từ và nghĩa nhé!'); return; }
+      addVocab(w, m, ex);
+      toast('📚 Đã thêm "' + w.trim() + '" (+2 XP)');
+      renderVocab($('#vocabSearch').value);
+    };
+    $('#vocabAdd').onclick = doAdd;
+    ['vw', 'vm', 'vex'].forEach(id => { $('#' + id).onkeydown = e => { if (e.key === 'Enter') doAdd(); }; });
+
+    $('#bulkToggle').onclick = () => { const z = $('#bulkZone'); z.style.display = z.style.display === 'none' ? 'block' : 'none'; };
+    $('#bulkAdd').onclick = () => {
+      const lines = $('#bulkText').value.split('\n');
+      let n = 0;
+      lines.forEach(line => {
+        const m = line.match(/^(.+?)\s*[:\-–—]\s*(.+)$/);
+        if (m && addVocab(m[1], m[2], '')) n++;
+      });
+      toast('📚 Đã nhập ' + n + ' từ (+' + (n * 2) + ' XP)');
+      renderVocab();
+    };
+
+    const search = $('#vocabSearch');
+    search.oninput = () => renderVocab(search.value);
+
+    document.querySelectorAll('.vocab-item .del').forEach(el => {
+      el.onclick = () => {
+        const v = vocabList().find(x => x.id === el.dataset.id);
+        if (v && confirm('Xóa từ "' + v.w + '"?')) { delVocab(v.id); renderVocab($('#vocabSearch').value); }
+      };
+    });
+    document.querySelectorAll('.vocab-item .edit').forEach(el => {
+      el.onclick = () => {
+        const v = vocabList().find(x => x.id === el.dataset.id);
+        if (!v) return;
+        delVocab(v.id);
+        renderVocab('');
+        $('#vw').value = v.w; $('#vm').value = v.m; $('#vex').value = v.ex || '';
+        $('#vw').focus();
+      };
+    });
+  }
+
   /* ================= AWARDS ================= */
   function renderAwards() {
     const g = gam(), li = levelInfo(g.xp), c = counters();
@@ -1124,6 +1357,8 @@
           <div class="stat"><b>${c.quizzes || 0}</b><span>quiz đã làm</span></div>
           <div class="stat"><b>${c.correct || 0}</b><span>câu đúng</span></div>
           <div class="stat"><b>${c.cards || 0}</b><span>phiên thẻ</span></div>
+          <div class="stat"><b>${vocabList().length}</b><span>từ vựng</span></div>
+          <div class="stat"><b>${reviewStats().known}</b><span>mục đã thuộc</span></div>
         </div>
       </div>
 
@@ -1173,6 +1408,7 @@
         route(/^\/ex\/(\w+)$/, renderExSet);
         route(/^\/ex$/, renderExList);
         route(/^\/awards$/, renderAwards);
+        route(/^\/vocab$/, () => renderVocab());
 
         window.addEventListener('hashchange', navigate);
         refreshStreakPill();

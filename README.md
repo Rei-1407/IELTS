@@ -9,6 +9,9 @@ Web ôn luyện ngữ pháp IELTS cá nhân, xây từ tài liệu `IELTS_Gramma
 - **Ôn lặp lại (spaced repetition)** — chương đã học được xếp lịch ôn 1→2→4→…→64 ngày; trả lời đúng ≥70% thì giãn lịch, sai thì ôn lại ngay hôm sau
 - **Flashcards** — công thức ngữ pháp, 66 động từ bất quy tắc, 63 cặp câu sai/đúng
 - **Ngân hàng bài tập** — 15 bộ (Phụ lục D & F) với 116 câu kèm đáp án từng câu
+- **Ôn tập từng mục (Leitner SRS)** — mỗi câu hỏi/công thức có hộp ôn tập riêng (1→2→4→7→15→30 ngày); quiz và flashcard ưu tiên mục đến hạn và mục chưa gặp; trang chủ hiển thị đã thuộc bao nhiêu/269 mục
+- **Sổ từ vựng cá nhân** — thêm từ (đơn lẻ hoặc hàng loạt), ôn bằng flashcard theo SRS, từ đến hạn tự trộn vào quiz ngày
+- **Gamification** — XP, cấp độ theo Band 3.0→9.0, 18 huy hiệu, nhiệm vụ ngày, đếm ngược ngày thi
 - **Tìm kiếm toàn văn**, giao diện tối/sáng, xuất/nhập tiến độ (JSON)
 
 ## Cập nhật nội dung
